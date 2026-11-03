@@ -1,0 +1,73 @@
+# ==========================================
+# NEPTUNE SYSTEMS - GITIGNORE CONFIGURATION
+# STRICT SECURITY & CREDENTIAL ISOLATION
+# ==========================================
+
+# Secrets and Private Credentials - NEVER COMMIT TO GITHUB
+.env
+.env.local
+.env.*
+!.env.example
+token.json
+client_secret.json
+service_account.json
+credentials.json
+*.pem
+*.key
+*.p12
+*.cert
+credentials/*
+!credentials/README.md
+
+# Streamlit Local Secrets
+.streamlit/secrets.toml
+
+# Local Backups & Mirror Databases (Contains customer records)
+backups/*
+!backups/.gitkeep
+
+# Application & Audit Logs (Contains activity timestamps & usernames)
+logs/*
+!logs/.gitkeep
+
+# Python Runtime & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Build and Distribution
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Pytest Caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

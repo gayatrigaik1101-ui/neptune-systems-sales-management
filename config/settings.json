@@ -1,0 +1,98 @@
+{
+  "app": {
+    "name": "Neptune Systems – Sales Management Dashboard",
+    "version": "1.0.0",
+    "organization": "Neptune Systems",
+    "session_timeout_minutes": 120,
+    "pagination_page_size": 25,
+    "concurrency_protection": true
+  },
+  "google_workspace": {
+    "account_email": "mallikarjungokule@gmail.com",
+    "spreadsheet_name": "Neptune Systems – Sales Customer Database",
+    "spreadsheet_id": "12uDlqhwf2moVgRCZvRnvpTYGa5O6OHAa_rWyME6ZF_4",
+    "form_name": "Neptune Systems – Customer & Sales Entry Form",
+    "form_id": "1yKen6MLCxqW1yEaibFI1oS06w8FK9R-k1JjQxEJm0MA",
+    "form_url": "https://docs.google.com/forms/d/1yKen6MLCxqW1yEaibFI1oS06w8FK9R-k1JjQxEJm0MA/viewform",
+    "auth_mode": "service_account",
+    "service_account_path": "credentials/service_account.json",
+    "oauth_client_path": "credentials/client_secret.json",
+    "oauth_token_path": "credentials/token.json"
+  },
+  "sheets": {
+    "sales_entries": {
+      "name": "Sales Entries",
+      "columns": [
+        "Entry ID",
+        "Date",
+        "Company Name",
+        "Customer Name",
+        "Company Address",
+        "Mobile Number",
+        "Email",
+        "Remark",
+        "Created At",
+        "Last Updated",
+        "Updated By"
+      ]
+    },
+    "edit_history": {
+      "name": "Edit History",
+      "columns": [
+        "History ID",
+        "Entry ID",
+        "Company Name",
+        "Field Changed",
+        "Previous Value",
+        "New Value",
+        "Updated By",
+        "Update Date & Time"
+      ]
+    },
+    "dashboard_data": {
+      "name": "Dashboard Data"
+    }
+  },
+  "authorized_users": [
+    {
+      "username": "sagar",
+      "display_name": "Sagar Sir",
+      "email": "sagar@neptunesystems.com",
+      "role": "sales_manager",
+      "password_hash": "$2b$12$41MM1mg2CVpmShV8QRVPqODh3/eMn8a4ekQ.qDC96Fayv51kQMQeK",
+      "is_active": true
+    },
+    {
+      "username": "tushar",
+      "display_name": "Tushar Sir",
+      "email": "tushar@neptunesystems.com",
+      "role": "sales_manager",
+      "password_hash": "$2b$12$MJUC.YIt4AmFz9sAZteE0.yyeK0DQYYb6p0hRaKxmUjNun9cHS4Qm",
+      "is_active": true
+    },
+    {
+      "username": "mallikarjun",
+      "display_name": "Mallikarjun Gokule (Admin)",
+      "email": "mallikarjungokule@gmail.com",
+      "role": "administrator",
+      "password_hash": "$2b$12$JFg4zj.ax8L5UqQFJJRUs.d3ZpPiQ/VGj0NwwHV13qW6dKkVM/za2",
+      "is_active": true
+    }
+  ],
+  "validation": {
+    "phone_digits_required": 10,
+    "date_format": "%d-%m-%Y",
+    "timestamp_format": "%d-%m-%Y %H:%M:%S",
+    "mandatory_fields": [
+      "Date",
+      "Company Name",
+      "Customer Name",
+      "Company Address",
+      "Mobile Number",
+      "Remark"
+    ],
+    "optional_fields": [
+      "Email"
+    ]
+  }
+}
