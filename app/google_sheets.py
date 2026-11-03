@@ -15,6 +15,12 @@ from app.audit_logger import AuditHistoryItem
 
 # Optional Google libraries import
 try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
+try:
     import gspread
     from google.oauth2.service_account import Credentials as ServiceAccountCredentials
     from google.oauth2.credentials import Credentials as UserOAuthCredentials
@@ -80,6 +86,19 @@ class GoogleSheetsConnector:
         oauth_token_path = config.resolve_path(gw_config.get("oauth_token_path", "credentials/token.json"))
         spreadsheet_name = gw_config.get("spreadsheet_name", "Neptune Systems – Sales Customer Database")
         spreadsheet_id = gw_config.get("spreadsheet_id", "").strip()
+
+        # Robust check for double .json extension on Windows or any service account key in credentials
+        if not sa_path.exists():
+            for candidate in [CREDENTIALS_DIR / "service_account.json.json", *CREDENTIALS_DIR.glob("*.json*")]:
+                if candidate.is_file() and candidate.name != "README.md":
+                    try:
+                        with open(candidate, "r", encoding="utf-8") as jf:
+                            key_data = json.load(jf)
+                            if key_data.get("type") == "service_account":
+                                sa_path = candidate
+                                break
+                    except Exception:
+                        continue
 
         try:
             # 1. Try Service Account Authentication (File or Streamlit Secrets)

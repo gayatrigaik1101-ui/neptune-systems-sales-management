@@ -6,6 +6,13 @@ Main Streamlit Application Entrypoint
 import sys
 from pathlib import Path
 
+# Enable Windows native certificate store for SSL connections
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 # Add project root to sys.path to ensure module imports resolve cleanly
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
