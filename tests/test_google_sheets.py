@@ -57,7 +57,7 @@ def test_local_mirror_persistence():
     assert res is not None
     row_idx, rec = res
     assert rec["Company Name"] == "Neptune Systems Test Lab"
-    assert rec["Mobile Number"] == "9988776655"
+    assert str(rec["Mobile Number"]) == "9988776655"
 
 
 def test_update_row_preserves_entry_id():

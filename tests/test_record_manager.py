@@ -31,7 +31,7 @@ def test_create_and_fetch_record(manager):
     rec = manager.get_record_by_id(entry_id)
     assert rec is not None
     assert rec["Company Name"] == "Omega Automation Ltd"
-    assert rec["Mobile Number"] == "9922334455"
+    assert str(rec["Mobile Number"]) == "9922334455"
 
 
 def test_edit_only_remark(manager):

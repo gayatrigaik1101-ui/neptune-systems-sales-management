@@ -287,14 +287,14 @@ def view_overview() -> None:
         with st.form("direct_entry_form"):
             fc1, fc2 = st.columns(2)
             with fc1:
-                e_date = st.date_input("Date *", value=datetime.now())
-                e_comp = st.text_input("Company Name *")
-                e_cust = st.text_input("Customer Name *")
-                e_addr = st.text_area("Company Address *")
+                e_date = st.date_input("Date", value=datetime.now())
+                e_comp = st.text_input("Company Name")
+                e_cust = st.text_input("Customer Name")
+                e_addr = st.text_area("Company Address")
             with fc2:
-                e_mobile = st.text_input("Mobile Number * (10 digits)", max_chars=10)
-                e_email = st.text_input("Email (Optional)")
-                e_remark = st.text_area("Remark *", help="Enquiries, notes, follow-up actions")
+                e_mobile = st.text_input("Mobile Number (10 digits)", max_chars=10)
+                e_email = st.text_input("Email")
+                e_remark = st.text_area("Remark", help="Enquiries, notes, follow-up actions")
 
             submitted = st.form_submit_button("Submit Customer Record", type="primary")
             if submitted:
@@ -516,19 +516,19 @@ def view_edit_customer(current_user: Any) -> None:
 
         if edit_mode == "Quick Edit Remark Only":
             st.info(f"Editing Remark for **{record.get('Company Name')}** ({record.get('Customer Name')})")
-            new_remark = st.text_area("Remark *", value=record.get("Remark", ""), height=150)
+            new_remark = st.text_area("Remark", value=record.get("Remark", ""), height=150)
             updated_payload["Remark"] = new_remark
         else:
             c1, c2 = st.columns(2)
             with c1:
-                new_date = st.text_input("Date (DD-MM-YYYY) *", value=record.get("Date", ""))
-                new_company = st.text_input("Company Name *", value=record.get("Company Name", ""))
-                new_customer = st.text_input("Customer Name *", value=record.get("Customer Name", ""))
-                new_address = st.text_area("Company Address *", value=record.get("Company Address", ""), height=100)
+                new_date = st.text_input("Date (DD-MM-YYYY)", value=record.get("Date", ""))
+                new_company = st.text_input("Company Name", value=record.get("Company Name", ""))
+                new_customer = st.text_input("Customer Name", value=record.get("Customer Name", ""))
+                new_address = st.text_area("Company Address", value=record.get("Company Address", ""), height=100)
             with c2:
-                new_mobile = st.text_input("Mobile Number (10 digits) *", value=str(record.get("Mobile Number", "")), max_chars=10)
+                new_mobile = st.text_input("Mobile Number (10 digits)", value=str(record.get("Mobile Number", "")), max_chars=10)
                 new_email = st.text_input("Email", value=record.get("Email", ""))
-                new_remark = st.text_area("Remark *", value=record.get("Remark", ""), height=100)
+                new_remark = st.text_area("Remark", value=record.get("Remark", ""), height=100)
 
             updated_payload = {
                 "Date": new_date,

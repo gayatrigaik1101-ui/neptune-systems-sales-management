@@ -35,16 +35,17 @@ class SalesDataValidator:
     def validate_date(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Date field.
-        Mandatory: YES
-        Must be a valid date, normalized to DD-MM-YYYY format.
+        Optional: If not provided, defaults to current date.
         """
         cleaned = clean_string(value)
         if not cleaned:
-            return False, "Date is mandatory.", None
+            from app.utils import get_current_date_str
+            return True, None, get_current_date_str()
 
         parsed = parse_date_string(cleaned)
         if not parsed:
-            return False, "Invalid date format. Expected DD-MM-YYYY (e.g. 02-11-2026).", None
+            # If parsing fails, preserve raw string or today's date
+            return True, None, cleaned
 
         normalized = parsed.strftime("%d-%m-%Y")
         return True, None, normalized
@@ -53,84 +54,52 @@ class SalesDataValidator:
     def validate_company_name(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Company Name field.
-        Mandatory: YES. Reject empty or whitespace-only values.
+        Optional: Allowed to be blank.
         """
         cleaned = clean_string(value)
-        if not cleaned:
-            return False, "Company Name is mandatory and cannot be blank or whitespace only.", None
-        if len(cleaned) < 2:
-            return False, "Company Name must be at least 2 characters.", None
         return True, None, cleaned
 
     @classmethod
     def validate_customer_name(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Customer Name field.
-        Mandatory: YES. Reject empty values.
+        Optional: Allowed to be blank.
         """
         cleaned = clean_string(value)
-        if not cleaned:
-            return False, "Customer Name is mandatory and cannot be blank.", None
-        if len(cleaned) < 2:
-            return False, "Customer Name must be at least 2 characters.", None
         return True, None, cleaned
 
     @classmethod
     def validate_company_address(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Company Address field.
-        Mandatory: YES. Allow complete addresses.
+        Optional: Allowed to be blank.
         """
         cleaned = clean_string(value)
-        if not cleaned:
-            return False, "Company Address is mandatory and cannot be blank.", None
-        if len(cleaned) < 5:
-            return False, "Company Address must contain at least 5 characters.", None
         return True, None, cleaned
 
     @classmethod
     def validate_mobile_number(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Mobile Number field.
-        Mandatory: YES. Must contain exactly 10 numeric digits.
-        Reject alphabetic characters, symbols, and invalid lengths.
+        Optional: Allowed to be blank.
+        If entered, cleans digits.
         """
         raw_str = clean_string(value)
         if not raw_str:
-            return False, "Mobile Number is mandatory.", None
-
-        # Check if contains letters or forbidden symbols
-        if re.search(r"[a-zA-Z]", raw_str):
-            return False, "Mobile Number must contain only digits. Alphabetic characters are rejected.", None
+            return True, None, ""
 
         digits = sanitize_phone_number(raw_str)
-        if len(digits) != 10:
-            return (
-                False,
-                f"Mobile Number must contain exactly 10 digits. Provided input contains {len(digits)} digits.",
-                None
-            )
-
-        # Standard mobile number sanity check (must start with 6, 7, 8, or 9 for Indian mobile numbers)
-        if not re.match(r"^[6-9]\d{9}$", digits):
-            # We still accept it if 10 digits, but warn if clearly non-standard
-            pass
-
-        return True, None, digits
+        return True, None, digits if digits else raw_str
 
     @classmethod
     def validate_email(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Email field.
-        Mandatory: NO.
-        Allow blank values. If entered, validate email format.
+        Optional: Allowed to be blank.
         """
         cleaned = clean_string(value)
         if not cleaned:
             return True, None, ""
-
-        if not cls.EMAIL_REGEX.match(cleaned):
-            return False, f"Invalid email format: '{cleaned}'. Please provide a valid email or leave blank.", None
 
         return True, None, cleaned.lower()
 
@@ -138,12 +107,9 @@ class SalesDataValidator:
     def validate_remark(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Validates Remark field.
-        Mandatory: YES.
-        Allow detailed customer interaction notes, requirements, enquiries, follow-up discussions.
+        Optional: Allowed to be blank.
         """
         cleaned = clean_string(value)
-        if not cleaned:
-            return False, "Remark is mandatory. Enter interaction notes, requirements, or follow-up details.", None
         return True, None, cleaned
 
     @classmethod

@@ -83,16 +83,15 @@
     "phone_digits_required": 10,
     "date_format": "%d-%m-%Y",
     "timestamp_format": "%d-%m-%Y %H:%M:%S",
-    "mandatory_fields": [
+    "mandatory_fields": [],
+    "optional_fields": [
       "Date",
       "Company Name",
       "Customer Name",
       "Company Address",
       "Mobile Number",
+      "Email",
       "Remark"
-    ],
-    "optional_fields": [
-      "Email"
     ]
   }
 }

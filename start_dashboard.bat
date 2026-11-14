@@ -17,8 +17,9 @@ if exist "C:\Users\Gayatri\anaconda3\python.exe" (
 )
 
 echo Starting Streamlit Dashboard...
-echo Dashboard will open at: http://localhost:8501
+echo Local Access: http://localhost:8501
+echo Network Access: http://192.168.1.11:8501
 echo.
-"%PY_EXE%" -m streamlit run app\main.py --server.port 8501 --server.headless false
+"%PY_EXE%" -m streamlit run app\main.py --server.port 8501 --server.address 0.0.0.0 --server.headless false
 
 pause

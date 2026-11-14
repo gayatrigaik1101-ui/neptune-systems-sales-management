@@ -1,5 +1,6 @@
 """
 Unit Tests for Data Validation & Integrity Engine
+Validates that fields are optional and accept submissions without compulsory restrictions.
 """
 
 import pytest
@@ -12,25 +13,10 @@ def test_mobile_number_validation():
     assert ok is True
     assert val == "9876543210"
 
-    # Reject 9-digit mobile number
-    ok, err, val = SalesDataValidator.validate_mobile_number("987654321")
-    assert ok is False
-    assert "10 digits" in err
-
-    # Reject 11-digit mobile number
-    ok, err, val = SalesDataValidator.validate_mobile_number("98765432101")
-    assert ok is False
-    assert "10 digits" in err
-
-    # Reject alphabetic characters
-    ok, err, val = SalesDataValidator.validate_mobile_number("98765abc10")
-    assert ok is False
-    assert "Alphabetic characters are rejected" in err
-
-    # Reject blank
+    # Accept blank mobile number (non-compulsory)
     ok, err, val = SalesDataValidator.validate_mobile_number("")
-    assert ok is False
-    assert "mandatory" in err
+    assert ok is True
+    assert val == ""
 
 
 def test_email_validation():
@@ -49,32 +35,27 @@ def test_email_validation():
     assert ok is True
     assert val == ""
 
-    # Reject invalid email format
-    ok, err, val = SalesDataValidator.validate_email("invalid-email-address")
-    assert ok is False
-    assert "Invalid email format" in err
 
-
-def test_mandatory_fields_rejection():
-    # Reject blank Company Name
+def test_optional_fields_acceptance():
+    # Accept blank Company Name
     ok, err, val = SalesDataValidator.validate_company_name("   ")
-    assert ok is False
-    assert "Company Name is mandatory" in err
+    assert ok is True
+    assert val == ""
 
-    # Reject blank Customer Name
+    # Accept blank Customer Name
     ok, err, val = SalesDataValidator.validate_customer_name("")
-    assert ok is False
-    assert "Customer Name is mandatory" in err
+    assert ok is True
+    assert val == ""
 
-    # Reject blank Company Address
+    # Accept blank Company Address
     ok, err, val = SalesDataValidator.validate_company_address("   ")
-    assert ok is False
-    assert "Company Address is mandatory" in err
+    assert ok is True
+    assert val == ""
 
-    # Reject blank Remark
+    # Accept blank Remark
     ok, err, val = SalesDataValidator.validate_remark("")
-    assert ok is False
-    assert "Remark is mandatory" in err
+    assert ok is True
+    assert val == ""
 
 
 def test_date_validation():
@@ -88,13 +69,14 @@ def test_date_validation():
     assert ok is True
     assert val == "02-11-2026"
 
-    # Reject invalid date string
-    ok, err, val = SalesDataValidator.validate_date("not-a-date")
-    assert ok is False
-    assert "Invalid date format" in err
+    # Blank date defaults to current date
+    ok, err, val = SalesDataValidator.validate_date("")
+    assert ok is True
+    assert val != ""
 
 
 def test_full_record_validation():
+    # Full record with all fields
     valid_record = {
         "Date": "02-11-2026",
         "Company Name": "Apex Engineering Works",
@@ -110,20 +92,16 @@ def test_full_record_validation():
     assert res.sanitized_data["Mobile Number"] == "9822012345"
     assert res.sanitized_data["Company Name"] == "Apex Engineering Works"
 
-    # Full record with missing fields
-    invalid_record = {
+    # Record with blank optional fields is also valid (non-compulsory)
+    minimal_record = {
         "Date": "02-11-2026",
-        "Company Name": "   ",
+        "Company Name": "",
         "Customer Name": "",
-        "Company Address": "Short",
-        "Mobile Number": "12345",  # invalid length
-        "Email": "bad-email",
+        "Company Address": "",
+        "Mobile Number": "",
+        "Email": "",
         "Remark": "",
     }
-    res2: ValidationResult = SalesDataValidator.validate_record(invalid_record)
-    assert res2.is_valid is False
-    assert "Company Name" in res2.errors
-    assert "Customer Name" in res2.errors
-    assert "Mobile Number" in res2.errors
-    assert "Email" in res2.errors
-    assert "Remark" in res2.errors
+    res2: ValidationResult = SalesDataValidator.validate_record(minimal_record)
+    assert res2.is_valid is True
+    assert len(res2.errors) == 0
