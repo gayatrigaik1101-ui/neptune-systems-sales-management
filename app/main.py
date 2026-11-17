@@ -1,6 +1,7 @@
 """
 Neptune Systems - Sales Management System
 Main Streamlit Application Entrypoint
+Version: 1.1.0 (Updated: Sequential Sr. No., Status & Remarks, Individual Deletion)
 """
 
 import sys
@@ -45,9 +46,10 @@ def render_login_screen() -> None:
                     <span style="font-size: 2.5rem;">💼</span>
                 </div>
                 <h2 style="color: #0F172A; margin: 0; font-weight: 700;">NEPTUNE SYSTEMS</h2>
-                <p style="color: #64748B; font-size: 0.95rem; margin-top: 0.25rem;">
+                <p style="color: #64748B; font-size: 0.95rem; margin-top: 0.25rem; margin-bottom: 0.5rem;">
                     Sales Entry & Customer Management Portal
                 </p>
+                <span style="display: inline-block; background: #EEF2FF; color: #4338CA; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 9999px;">v1.1.0 (Sr. No. & Status Active)</span>
                 <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 0.75rem; margin: 1.5rem 0; font-size: 0.85rem; color: #475569; text-align: left;">
                     🔒 <strong>Authorised Access Only</strong><br>
                     Editing access is strictly restricted to <strong>Sagar Sir</strong> and <strong>Tushar Sir</strong>. General sales team members record enquiries via the Google Form.

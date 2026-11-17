@@ -170,6 +170,7 @@ def render_sidebar(current_user: Any) -> str:
         st.markdown(f"### **{current_user.display_name}**")
         st.caption(f"Role: {current_user.role.replace('_', ' ').title()}")
         st.caption(f"Email: {current_user.email}")
+        st.caption("🚀 Version 1.1.0 (Sr. No. & Status Updates)")
         st.divider()
 
         nav_options = [
