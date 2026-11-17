@@ -7,7 +7,13 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from app.utils import clean_string, sanitize_phone_number, parse_date_string
+from app.utils import (
+    clean_string,
+    sanitize_phone_number,
+    parse_date_string,
+    STATUS_OPTIONS,
+    REMARK_1_OPTIONS,
+)
 
 
 @dataclass
@@ -106,8 +112,51 @@ class SalesDataValidator:
     @classmethod
     def validate_remark(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
         """
-        Validates Remark field.
+        Validates Remark field (legacy/fallback).
         Optional: Allowed to be blank.
+        """
+        cleaned = clean_string(value)
+        return True, None, cleaned
+
+    @classmethod
+    def validate_status(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Validates Status field.
+        Options: Interested, Not Interested, Genuine.
+        Optional: Allowed to be blank or any valid Status.
+        """
+        cleaned = clean_string(value)
+        if not cleaned:
+            return True, None, ""
+
+        # Match case-insensitively to canonical options
+        for opt in STATUS_OPTIONS:
+            if cleaned.lower() == opt.lower():
+                return True, None, opt
+
+        return True, None, cleaned
+
+    @classmethod
+    def validate_remark_1(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Validates Remark 1 dropdown field.
+        Optional: Allowed to be blank or any valid Remark 1 option.
+        """
+        cleaned = clean_string(value)
+        if not cleaned:
+            return True, None, ""
+
+        for opt in REMARK_1_OPTIONS:
+            if cleaned.lower() == opt.lower():
+                return True, None, opt
+
+        return True, None, cleaned
+
+    @classmethod
+    def validate_remark_2(cls, value: Any) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Validates Remark 2 manual free-text entry field.
+        Optional: Allowed to be blank or free-form text.
         """
         cleaned = clean_string(value)
         return True, None, cleaned
@@ -163,15 +212,36 @@ class SalesDataValidator:
         else:
             sanitized["Email"] = val
 
-        # 7. Remark
-        ok, err, val = cls.validate_remark(data.get("Remark"))
+        # 7. Status
+        ok, err, val = cls.validate_status(data.get("Status"))
         if not ok and err:
-            errors["Remark"] = err
+            errors["Status"] = err
         else:
-            sanitized["Remark"] = val
+            sanitized["Status"] = val
 
-        # Preserve metadata if present
-        for meta_field in ["Entry ID", "Created At", "Last Updated", "Updated By"]:
+        # 8. Remark 1 (Dropdown)
+        ok, err, val = cls.validate_remark_1(data.get("Remark 1"))
+        if not ok and err:
+            errors["Remark 1"] = err
+        else:
+            sanitized["Remark 1"] = val
+
+        # 9. Remark 2 (Manual Entry)
+        # Fall back to legacy Remark if Remark 2 is empty but Remark is provided
+        raw_remark_2 = data.get("Remark 2")
+        if not raw_remark_2 and data.get("Remark"):
+            raw_remark_2 = data.get("Remark")
+        ok, err, val = cls.validate_remark_2(raw_remark_2)
+        if not ok and err:
+            errors["Remark 2"] = err
+        else:
+            sanitized["Remark 2"] = val
+
+        # Keep legacy Remark in sync if needed
+        sanitized["Remark"] = sanitized["Remark 2"] or sanitized["Remark 1"]
+
+        # Preserve metadata and identifiers if present
+        for meta_field in ["Sr. No.", "Record ID", "Entry ID", "Created At", "Last Updated", "Updated By"]:
             if meta_field in data:
                 sanitized[meta_field] = clean_string(data[meta_field])
 
@@ -192,6 +262,9 @@ class SalesDataValidator:
             "Mobile Number": cls.validate_mobile_number,
             "Email": cls.validate_email,
             "Remark": cls.validate_remark,
+            "Status": cls.validate_status,
+            "Remark 1": cls.validate_remark_1,
+            "Remark 2": cls.validate_remark_2,
         }
         validator = mapping.get(field_name)
         if not validator:

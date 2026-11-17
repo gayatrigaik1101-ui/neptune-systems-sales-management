@@ -118,24 +118,27 @@ class AppConfig:
                 "sales_entries": {
                     "name": "Sales Entries",
                     "columns": [
-                        "Entry ID",
+                        "Sr. No.",
                         "Date",
                         "Company Name",
                         "Customer Name",
                         "Company Address",
                         "Mobile Number",
                         "Email",
-                        "Remark",
+                        "Status",
+                        "Remark 1",
+                        "Remark 2",
                         "Created At",
                         "Last Updated",
                         "Updated By",
+                        "Record ID",
                     ],
                 },
                 "edit_history": {
                     "name": "Edit History",
                     "columns": [
                         "History ID",
-                        "Entry ID",
+                        "Record ID",
                         "Company Name",
                         "Field Changed",
                         "Previous Value",
@@ -151,15 +154,18 @@ class AppConfig:
                 "phone_digits_required": 10,
                 "date_format": "%d-%m-%Y",
                 "timestamp_format": "%d-%m-%Y %H:%M:%S",
-                "mandatory_fields": [
+                "mandatory_fields": [],
+                "optional_fields": [
                     "Date",
                     "Company Name",
                     "Customer Name",
                     "Company Address",
                     "Mobile Number",
-                    "Remark",
+                    "Email",
+                    "Status",
+                    "Remark 1",
+                    "Remark 2",
                 ],
-                "optional_fields": ["Email"],
             },
         }
 

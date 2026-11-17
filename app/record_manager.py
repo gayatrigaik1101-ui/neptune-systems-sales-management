@@ -48,16 +48,21 @@ class RecordManager:
 
     def search_records(
         self,
-        entry_id: str = "",
+        sr_no: str = "",
         company_name: str = "",
         customer_name: str = "",
         mobile_number: str = "",
         date_str: str = "",
+        status: str = "",
+        remark_1: str = "",
         general_query: str = "",
+        entry_id: str = "",
     ) -> List[Dict[str, Any]]:
         """
         Searches records using multi-criteria filtering:
-        - Entry ID
+        - Sr. No.
+        - Status (Dropdown filter: Interested, Not Interested, Genuine)
+        - Remark 1 (Dropdown filter)
         - Company Name
         - Customer Name
         - Mobile Number
@@ -67,23 +72,34 @@ class RecordManager:
         all_records = self.get_all_records(sort_by_date=True)
         filtered = []
 
-        q_id = clean_string(entry_id).upper()
+        q_sr = clean_string(sr_no)
         q_comp = clean_string(company_name).lower()
         q_cust = clean_string(customer_name).lower()
         q_mob = clean_string(mobile_number)
         q_date = clean_string(date_str)
+        q_status = clean_string(status)
+        q_rem1 = clean_string(remark_1)
         q_gen = clean_string(general_query).lower()
+        q_id = clean_string(entry_id).upper()
 
         for rec in all_records:
-            r_id = clean_string(rec.get("Entry ID", "")).upper()
+            r_sr = str(rec.get("Sr. No.", ""))
+            r_id = clean_string(rec.get("Record ID") or rec.get("Entry ID", "")).upper()
             r_comp = clean_string(rec.get("Company Name", "")).lower()
             r_cust = clean_string(rec.get("Customer Name", "")).lower()
             r_mob = clean_string(rec.get("Mobile Number", ""))
             r_date = clean_string(rec.get("Date", ""))
-            r_remark = clean_string(rec.get("Remark", "")).lower()
+            r_status = clean_string(rec.get("Status", ""))
+            r_rem1 = clean_string(rec.get("Remark 1", ""))
+            r_rem2 = clean_string(rec.get("Remark 2", "") or rec.get("Remark", "")).lower()
 
-            # Exact or partial match checks
+            if q_sr and q_sr != r_sr:
+                continue
             if q_id and q_id not in r_id:
+                continue
+            if q_status and q_status != "All" and q_status.lower() != r_status.lower():
+                continue
+            if q_rem1 and q_rem1 != "All" and q_rem1.lower() != r_rem1.lower():
                 continue
             if q_comp and q_comp not in r_comp:
                 continue
@@ -96,7 +112,7 @@ class RecordManager:
 
             # General query across full record
             if q_gen:
-                haystack = f"{r_id} {r_comp} {r_cust} {r_mob} {r_date} {r_remark}"
+                haystack = f"{r_sr} {r_comp} {r_cust} {r_mob} {r_date} {r_status.lower()} {r_rem1.lower()} {r_rem2}"
                 if q_gen not in haystack:
                     continue
 
@@ -158,6 +174,13 @@ class RecordManager:
                 raise ConcurrentEditConflictError(err_msg)
 
         # 2. VALIDATE ALL CHANGED FIELDS
+        caller_keys = set(updated_fields.keys())
+        # Sync legacy Remark and Remark 2 if only one is updated
+        if "Remark" in updated_fields and "Remark 2" not in updated_fields:
+            updated_fields["Remark 2"] = updated_fields["Remark"]
+        elif "Remark 2" in updated_fields and "Remark" not in updated_fields:
+            updated_fields["Remark"] = updated_fields["Remark 2"]
+
         merged_for_validation = dict(original_record)
         merged_for_validation.update(updated_fields)
 
@@ -173,6 +196,7 @@ class RecordManager:
             original_record=original_record,
             updated_fields=validation.sanitized_data,
             editor_identity=editor_identity,
+            caller_keys=caller_keys,
         )
 
         if not audit_items:
@@ -196,21 +220,48 @@ class RecordManager:
         )
         return True, f"Successfully updated record {entry_id} ({len(audit_items)} field(s) changed).", audit_items
 
-    def delete_record(self, entry_id: str, deleted_by: str) -> Tuple[bool, str]:
+    @staticmethod
+    def is_user_authorized_for_deletion(user: Optional[Any], deleted_by_str: str = "") -> bool:
         """
-        Deletes a sales record by Entry ID.
-        Verifies record exists, removes it from Worksheet 1,
-        and logs a permanent deletion audit entry in Worksheet 2.
+        Only Sagar Sir and Tushar Sir are authorized to delete customer records.
         """
-        rec = self.get_record_by_id(entry_id)
-        if not rec:
-            return False, f"Record with Entry ID '{entry_id}' not found."
+        if user is not None:
+            uname = getattr(user, "username", "").lower().strip()
+            disp = getattr(user, "display_name", "").lower().strip()
+            em = getattr(user, "email", "").lower().strip()
+            if uname in {"sagar", "tushar"} or "sagar" in disp or "tushar" in disp or "sagar" in em or "tushar" in em:
+                return True
+        del_clean = str(deleted_by_str).lower().strip()
+        if "sagar" in del_clean or "tushar" in del_clean:
+            return True
+        return False
 
-        success = self.sheets.delete_sales_entry(entry_id=entry_id, deleted_by=deleted_by)
+    def delete_record(
+        self,
+        record_id: str,
+        deleted_by: str,
+        user: Optional[Any] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Deletes a sales record by permanent Record ID.
+        ENFORCES STRICT ROLE RESTRICTION:
+        Only Sagar Sir and Tushar Sir are authorized to delete customer records.
+        Recalculates sequential Sr. No. and preserves unbroken audit trail in Edit History.
+        """
+        if not self.is_user_authorized_for_deletion(user, deleted_by):
+            logger.warning(f"Unauthorized deletion attempt by '{deleted_by}' on record '{record_id}'")
+            return False, "Permission Denied: Only Sagar Sir and Tushar Sir are authorized to delete customer records."
+
+        rec = self.get_record_by_id(record_id)
+        if not rec:
+            return False, f"Record '{record_id}' not found."
+
+        company = rec.get("Company Name", "Unknown")
+        success = self.sheets.delete_sales_entry(record_id=record_id, deleted_by=deleted_by)
         if success:
-            logger.info(f"Record {entry_id} deleted by {deleted_by}.")
-            return True, f"Record {entry_id} has been permanently deleted and logged in Edit History."
-        return False, f"Failed to delete record {entry_id} from database."
+            logger.info(f"Record {record_id} ({company}) deleted by {deleted_by}.")
+            return True, f"Record {record_id} ({company}) has been permanently deleted and logged in Edit History."
+        return False, f"Failed to delete record {record_id} from database."
 
     def get_edit_history(
         self,
@@ -239,7 +290,7 @@ class RecordManager:
         for item in all_history:
             h_user = clean_string(item.get("Updated By", "")).lower()
             h_comp = clean_string(item.get("Company Name", "")).lower()
-            h_id = clean_string(item.get("Entry ID", "")).upper()
+            h_id = clean_string(item.get("Record ID") or item.get("Entry ID", "")).upper()
             h_ts = clean_string(item.get("Update Date & Time", ""))
 
             if q_user and q_user not in h_user:
@@ -274,14 +325,27 @@ class RecordManager:
         added_today = 0
         updated_today = 0
         followup_count = 0
+        interested_count = 0
+        genuine_count = 0
 
+        followup_remark_options = {
+            "follow-up required", "calling pending", "visit pending",
+            "customer want visit", "decision pending", "quotation pending", "call back"
+        }
         followup_keywords = ["follow-up", "followup", "call back", "quote", "pending", "requirement", "demo", "interested"]
 
         for r in records:
             created_at = clean_string(r.get("Created At", ""))
             last_updated = clean_string(r.get("Last Updated", ""))
             date_field = clean_string(r.get("Date", ""))
-            remark = clean_string(r.get("Remark", "")).lower()
+            status_val = clean_string(r.get("Status", "")).lower()
+            rem1_val = clean_string(r.get("Remark 1", "")).lower()
+            rem2_val = clean_string(r.get("Remark 2", "") or r.get("Remark", "")).lower()
+
+            if status_val == "interested":
+                interested_count += 1
+            elif status_val == "genuine":
+                genuine_count += 1
 
             if today_str in created_at or today_str in date_field:
                 added_today += 1
@@ -289,7 +353,7 @@ class RecordManager:
             if today_str in last_updated and last_updated != created_at:
                 updated_today += 1
 
-            if any(kw in remark for kw in followup_keywords):
+            if rem1_val in followup_remark_options or any(kw in rem2_val for kw in followup_keywords):
                 followup_count += 1
 
         return {
@@ -298,6 +362,8 @@ class RecordManager:
             "entries_added_today": added_today,
             "entries_updated_today": updated_today,
             "requiring_followup": followup_count,
+            "total_interested": interested_count,
+            "total_genuine": genuine_count,
         }
 
 

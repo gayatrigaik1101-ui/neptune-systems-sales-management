@@ -38,6 +38,7 @@ class AuditHistoryItem:
         """Converts item into a dictionary for API/JSON handling."""
         return {
             "History ID": self.history_id,
+            "Record ID": self.entry_id,
             "Entry ID": self.entry_id,
             "Company Name": self.company_name,
             "Field Changed": self.field_changed,
@@ -59,6 +60,7 @@ class AuditLogger:
         original_record: Dict[str, Any],
         updated_fields: Dict[str, Any],
         editor_identity: str,
+        caller_keys: Optional[Any] = None,
     ) -> List[AuditHistoryItem]:
         """
         Compares original record with updated fields to generate individual AuditHistoryItems.
@@ -67,12 +69,22 @@ class AuditLogger:
         changes: List[AuditHistoryItem] = []
         now_str = get_current_timestamp_str()
 
-        # Exclude metadata fields from field change tracking
-        ignored_fields = {"Entry ID", "Created At", "Last Updated", "Updated By"}
+        # Exclude metadata and identifier fields from field change tracking
+        ignored_fields = {"Sr. No.", "Record ID", "Entry ID", "Created At", "Last Updated", "Updated By"}
+
+        c_keys = set(caller_keys) if caller_keys is not None else None
 
         for field_name, new_val in updated_fields.items():
             if field_name in ignored_fields:
                 continue
+
+            if c_keys is not None:
+                if field_name not in c_keys:
+                    # If caller updated "Remark" and not "Remark 2", avoid duplicate "Remark 2" log
+                    if field_name == "Remark 2" and "Remark" in c_keys:
+                        continue
+                    if field_name == "Remark" and "Remark 2" in c_keys:
+                        continue
 
             old_val_cleaned = clean_string(original_record.get(field_name, ""))
             new_val_cleaned = clean_string(new_val)

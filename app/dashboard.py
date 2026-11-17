@@ -9,12 +9,22 @@ import pandas as pd
 import streamlit as st
 
 from app.config import config
-from app.utils import clean_string, get_current_date_str
+from app.utils import clean_string, get_current_date_str, STATUS_OPTIONS, REMARK_1_OPTIONS
 from app.validation import SalesDataValidator, ValidationResult
 from app.authentication import get_current_user, logout_user, auth_manager
 from app.record_manager import record_manager, ConcurrentEditConflictError
 from app.google_sheets import sheets_connector
 from app.audit_logger import AuditLogger
+
+
+def is_authorized_to_delete(user: Any) -> bool:
+    """Only Sagar Sir and Tushar Sir are allowed to delete records."""
+    if not user:
+        return False
+    uname = getattr(user, "username", "").lower().strip()
+    disp = getattr(user, "display_name", "").lower().strip()
+    em = getattr(user, "email", "").lower().strip()
+    return uname in {"sagar", "tushar"} or "sagar" in disp or "tushar" in disp or "sagar" in em or "tushar" in em
 
 
 def apply_custom_css() -> None:
@@ -228,8 +238,8 @@ def view_overview() -> None:
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-card-title">Total Companies</div>
-                <div class="metric-card-value" style="color: #0369A1;">{metrics['total_companies']}</div>
+                <div class="metric-card-title">Genuine Leads</div>
+                <div class="metric-card-value" style="color: #0369A1;">{metrics.get('total_genuine', 0)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -238,8 +248,8 @@ def view_overview() -> None:
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-card-title">Added Today</div>
-                <div class="metric-card-value" style="color: #15803D;">{metrics['entries_added_today']}</div>
+                <div class="metric-card-title">Interested</div>
+                <div class="metric-card-value" style="color: #15803D;">{metrics.get('total_interested', 0)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -248,8 +258,8 @@ def view_overview() -> None:
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-card-title">Updated Today</div>
-                <div class="metric-card-value" style="color: #7C3AED;">{metrics['entries_updated_today']}</div>
+                <div class="metric-card-title">Added Today</div>
+                <div class="metric-card-value" style="color: #7C3AED;">{metrics['entries_added_today']}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -274,8 +284,8 @@ def view_overview() -> None:
         df = pd.DataFrame(all_records)
         display_cols = [
             col for col in [
-                "Entry ID", "Date", "Company Name", "Customer Name",
-                "Mobile Number", "Remark", "Last Updated", "Updated By"
+                "Sr. No.", "Date", "Company Name", "Customer Name",
+                "Mobile Number", "Status", "Remark 1", "Remark 2", "Last Updated", "Updated By"
             ] if col in df.columns
         ]
         st.dataframe(df[display_cols].head(10), use_container_width=True, hide_index=True)
@@ -294,7 +304,9 @@ def view_overview() -> None:
             with fc2:
                 e_mobile = st.text_input("Mobile Number (10 digits)", max_chars=10)
                 e_email = st.text_input("Email")
-                e_remark = st.text_area("Remark", help="Enquiries, notes, follow-up actions")
+                e_status = st.selectbox("Status", ["", *STATUS_OPTIONS], index=0)
+                e_rem1 = st.selectbox("Remark 1", ["", *REMARK_1_OPTIONS], index=0)
+                e_rem2 = st.text_area("Remark 2 (Manual Entry)", help="Enter custom notes or interaction details")
 
             submitted = st.form_submit_button("Submit Customer Record", type="primary")
             if submitted:
@@ -305,9 +317,11 @@ def view_overview() -> None:
                     "Company Address": e_addr,
                     "Mobile Number": e_mobile,
                     "Email": e_email,
-                    "Remark": e_remark,
+                    "Status": e_status,
+                    "Remark 1": e_rem1,
+                    "Remark 2": e_rem2,
                 }
-                success, msg, entry_id = record_manager.create_record(payload, created_by="Dashboard Form")
+                success, msg, rec_id = record_manager.create_record(payload, created_by="Dashboard Form")
                 if success:
                     st.success(f"{msg}")
                     st.rerun()
@@ -319,39 +333,67 @@ def view_overview() -> None:
 # VIEW 2: ALL SALES ENTRIES
 # =============================================================================
 
-def view_all_entries() -> None:
-    """Renders table of all sales records with filters, search, and pagination."""
+def view_all_entries(current_user: Any = None) -> None:
+    """Renders table of all sales records with Status/Remark 1 dropdown filters, search, and pagination."""
     st.subheader("All Customer Sales Entries")
 
     all_records = record_manager.get_all_records(sort_by_date=True)
-
-    c1, c2, c3 = st.columns([3, 1, 1])
-    with c1:
-        search_query = st.text_input("🔍 Quick search by Company, Customer, Phone, or ID...", "")
-    with c2:
-        sort_choice = st.selectbox("Sort By", ["Newest Date First", "Oldest Date First", "Company A-Z"])
-    with c3:
-        page_size = st.selectbox("Rows per page", [10, 25, 50, 100], index=1)
 
     if not all_records:
         st.info("The sales database is currently empty.")
         return
 
-    # Filter records
-    filtered = all_records
-    if search_query:
-        filtered = record_manager.search_records(general_query=search_query)
+    # Top search and display controls
+    c1, c2, c3 = st.columns([3, 1, 1])
+    with c1:
+        search_query = st.text_input("🔍 Quick search across all fields...", "")
+    with c2:
+        sort_choice = st.selectbox(
+            "Sort By",
+            ["Sr. No. (Ascending)", "Newest Date First", "Oldest Date First", "Company A-Z"]
+        )
+    with c3:
+        page_size = st.selectbox("Rows per page", [10, 25, 50, 100], index=1)
 
-    if sort_choice == "Oldest Date First":
+    # Dedicated Dropdown Filter Bar: Status & Remark 1
+    fc1, fc2 = st.columns(2)
+    with fc1:
+        status_filter = st.selectbox("📌 Filter by Status", ["All", *STATUS_OPTIONS])
+    with fc2:
+        remark_filter = st.selectbox("🏷️ Filter by Remark 1", ["All", *REMARK_1_OPTIONS])
+
+    # Apply filters
+    filtered = all_records
+    if status_filter != "All":
+        filtered = [r for r in filtered if clean_string(r.get("Status", "")).lower() == status_filter.lower()]
+
+    if remark_filter != "All":
+        filtered = [r for r in filtered if clean_string(r.get("Remark 1", "")).lower() == remark_filter.lower()]
+
+    if search_query:
+        filtered = record_manager.search_records(
+            status=status_filter if status_filter != "All" else "",
+            remark_1=remark_filter if remark_filter != "All" else "",
+            general_query=search_query
+        )
+
+    # Sort records
+    if sort_choice == "Sr. No. (Ascending)":
+        filtered = sorted(filtered, key=lambda x: int(x.get("Sr. No.", 0) or 0))
+    elif sort_choice == "Oldest Date First":
         filtered = list(reversed(filtered))
     elif sort_choice == "Company A-Z":
         filtered = sorted(filtered, key=lambda x: clean_string(x.get("Company Name", "")).lower())
 
     st.caption(f"Showing {len(filtered)} matching records out of {len(all_records)} total.")
 
+    # Table columns to display (Hide internal Record ID / Entry ID; show clean Sr. No.)
+    display_cols = [
+        "Sr. No.", "Date", "Company Name", "Customer Name", "Company Address",
+        "Mobile Number", "Email", "Status", "Remark 1", "Remark 2", "Last Updated", "Updated By"
+    ]
     df = pd.DataFrame(filtered)
-    columns_order = config.sales_entries_columns
-    available_cols = [c for c in columns_order if c in df.columns]
+    available_cols = [c for c in display_cols if c in df.columns]
 
     # Pagination logic
     total_pages = max(1, (len(filtered) - 1) // page_size + 1)
@@ -369,49 +411,86 @@ def view_all_entries() -> None:
     if not page_df.empty:
         st.dataframe(page_df[available_cols], use_container_width=True, hide_index=True)
 
-    # Action selector to edit
+    # Record Actions Section (Edit & Individual Delete)
     st.divider()
-    st.markdown("#### **Select Record to Edit**")
-    entry_id_list = [r.get("Entry ID") for r in page_records if r.get("Entry ID")]
-    if entry_id_list:
-        ec1, ec2 = st.columns([3, 1])
-        with ec1:
-            chosen_id = st.selectbox("Choose Entry ID to edit:", entry_id_list)
-        with ec2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("✏️ Edit Selected Record", type="primary"):
+    act_col1, act_col2 = st.columns(2)
+
+    with act_col1:
+        st.markdown("#### **✏️ Edit Customer Record**")
+        record_label_map = {
+            f"Sr. No. {r.get('Sr. No.')} - {r.get('Company Name')} ({r.get('Customer Name')})": (r.get("Record ID") or r.get("Entry ID"))
+            for r in page_records if (r.get("Record ID") or r.get("Entry ID"))
+        }
+        if record_label_map:
+            chosen_label = st.selectbox("Select Customer to Edit:", list(record_label_map.keys()), key="sel_edit_rec")
+            chosen_id = record_label_map[chosen_label]
+            if st.button("✏️ Open Edit Form", type="primary", use_container_width=True):
                 st.session_state["selected_entry_id"] = chosen_id
                 st.session_state["active_nav"] = "Edit Customer Details"
                 st.rerun()
+        else:
+            st.info("No records on this page to edit.")
+
+    with act_col2:
+        st.markdown("#### **🗑️ Delete Customer Record**")
+        can_delete = is_authorized_to_delete(current_user)
+        if not can_delete:
+            st.info("🔒 Record deletion is restricted to Sagar Sir and Tushar Sir only.")
+        else:
+            del_label_map = {
+                f"Sr. No. {r.get('Sr. No.')} - {r.get('Company Name')} ({r.get('Customer Name')})": (r.get("Record ID") or r.get("Entry ID"))
+                for r in page_records if (r.get("Record ID") or r.get("Entry ID"))
+            }
+            if del_label_map:
+                chosen_del_label = st.selectbox("Select Customer to Delete:", list(del_label_map.keys()), key="sel_del_rec")
+                chosen_del_id = del_label_map[chosen_del_label]
+
+                st.warning(f"Deleting **{chosen_del_label}** will remove it from Sales Entries and log an audit trail.")
+                confirm_del = st.checkbox("I confirm I want to permanently delete this record", key=f"confirm_del_all_{chosen_del_id}")
+
+                if st.button("🚨 Delete Selected Record", type="secondary", disabled=not confirm_del, use_container_width=True):
+                    editor_identity = f"{current_user.display_name} ({current_user.email})" if current_user else "Authorized Manager"
+                    del_ok, del_msg = record_manager.delete_record(chosen_del_id, deleted_by=editor_identity, user=current_user)
+                    if del_ok:
+                        st.success(del_msg)
+                        st.rerun()
+                    else:
+                        st.error(del_msg)
+            else:
+                st.info("No records on this page to delete.")
 
 
 # =============================================================================
 # VIEW 3: SEARCH CUSTOMER
 # =============================================================================
 
-def view_search() -> None:
-    """Renders comprehensive search interface."""
+def view_search(current_user: Any = None) -> None:
+    """Renders comprehensive search interface with Status & Remark 1 filters."""
     st.subheader("Search Customer Records")
 
     with st.container():
         sc1, sc2, sc3 = st.columns(3)
         with sc1:
-            q_id = st.text_input("Entry ID", placeholder="e.g. NEP-20261102-...")
+            q_sr = st.text_input("Sr. No.", placeholder="e.g. 1, 2, 3...")
             q_comp = st.text_input("Company Name", placeholder="e.g. Apex Engineering")
         with sc2:
+            q_status = st.selectbox("Filter by Status", ["All", *STATUS_OPTIONS], key="search_status")
+            q_rem1 = st.selectbox("Filter by Remark 1", ["All", *REMARK_1_OPTIONS], key="search_rem1")
+        with sc3:
             q_cust = st.text_input("Customer Name", placeholder="e.g. Rahul Patil")
             q_mob = st.text_input("Mobile Number", placeholder="e.g. 9822012345")
-        with sc3:
-            q_date = st.text_input("Date (DD-MM-YYYY)", placeholder="e.g. 02-11-2026")
-            st.markdown("<br>", unsafe_allow_html=True)
-            search_clicked = st.button("🔍 Search Database", type="primary", use_container_width=True)
+
+        q_date = st.text_input("Date (DD-MM-YYYY)", placeholder="e.g. 02-11-2026")
+        search_clicked = st.button("🔍 Search Database", type="primary", use_container_width=True)
 
     results = record_manager.search_records(
-        entry_id=q_id,
+        sr_no=q_sr,
         company_name=q_comp,
         customer_name=q_cust,
         mobile_number=q_mob,
         date_str=q_date,
+        status=q_status if q_status != "All" else "",
+        remark_1=q_rem1 if q_rem1 != "All" else "",
     )
 
     st.divider()
@@ -421,24 +500,49 @@ def view_search() -> None:
         st.warning("No records matched your search criteria.")
         return
 
+    can_delete = is_authorized_to_delete(current_user)
+
     for rec in results:
-        with st.expander(f"🏢 **{rec.get('Company Name')}** | {rec.get('Customer Name')} (ID: {rec.get('Entry ID')})"):
+        sr_num = rec.get("Sr. No.", "")
+        comp_name = rec.get("Company Name", "")
+        cust_name = rec.get("Customer Name", "")
+        rec_id = rec.get("Record ID") or rec.get("Entry ID")
+
+        with st.expander(f"Sr. No. {sr_num} | 🏢 **{comp_name}** | {cust_name} (Status: {rec.get('Status') or 'None'})"):
             c1, c2 = st.columns(2)
             with c1:
                 st.write(f"**Date:** {rec.get('Date')}")
                 st.write(f"**Mobile Number:** {rec.get('Mobile Number')}")
                 st.write(f"**Email:** {rec.get('Email') or 'None'}")
                 st.write(f"**Company Address:** {rec.get('Company Address')}")
+                st.write(f"**Status:** {rec.get('Status') or 'None'}")
             with c2:
-                st.write(f"**Remark:** {rec.get('Remark')}")
+                st.write(f"**Remark 1:** {rec.get('Remark 1') or 'None'}")
+                st.write(f"**Remark 2:** {rec.get('Remark 2') or rec.get('Remark') or 'None'}")
                 st.write(f"**Created At:** {rec.get('Created At')}")
                 st.write(f"**Last Updated:** {rec.get('Last Updated')}")
                 st.write(f"**Updated By:** {rec.get('Updated By')}")
 
-            if st.button(f"✏️ Edit Record {rec.get('Entry ID')}", key=f"btn_edit_{rec.get('Entry ID')}"):
-                st.session_state["selected_entry_id"] = rec.get("Entry ID")
-                st.session_state["active_nav"] = "Edit Customer Details"
-                st.rerun()
+            btn_c1, btn_c2 = st.columns(2)
+            with btn_c1:
+                if st.button(f"✏️ Edit Sr. No. {sr_num}", key=f"btn_edit_search_{rec_id}"):
+                    st.session_state["selected_entry_id"] = rec_id
+                    st.session_state["active_nav"] = "Edit Customer Details"
+                    st.rerun()
+
+            with btn_c2:
+                if can_delete:
+                    del_confirm_search = st.checkbox("Confirm delete", key=f"chk_del_search_{rec_id}")
+                    if st.button(f"🚨 Delete Sr. No. {sr_num}", key=f"btn_del_search_{rec_id}", disabled=not del_confirm_search):
+                        editor_identity = f"{current_user.display_name} ({current_user.email})" if current_user else "Authorized Manager"
+                        del_ok, del_msg = record_manager.delete_record(rec_id, deleted_by=editor_identity, user=current_user)
+                        if del_ok:
+                            st.success(del_msg)
+                            st.rerun()
+                        else:
+                            st.error(del_msg)
+                else:
+                    st.caption("🔒 Deletion restricted to Sagar Sir & Tushar Sir.")
 
 
 # =============================================================================
@@ -463,8 +567,8 @@ def view_edit_customer(current_user: Any) -> None:
         return
 
     record_options = {
-        f"{r.get('Entry ID')} - {r.get('Company Name')} ({r.get('Customer Name')})": r.get('Entry ID')
-        for r in all_records if r.get('Entry ID')
+        f"Sr. No. {r.get('Sr. No.')} - {r.get('Company Name')} ({r.get('Customer Name')})": (r.get("Record ID") or r.get("Entry ID"))
+        for r in all_records if (r.get("Record ID") or r.get("Entry ID"))
     }
 
     # Pre-select ID if transferred from another view
@@ -495,10 +599,11 @@ def view_edit_customer(current_user: Any) -> None:
     st.markdown(
         f"""
         <div style="background: #EFF6FF; border: 1px solid #BFDBFE; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem;">
-            <strong>Entry ID:</strong> <code>{record.get('Entry ID')}</code> &nbsp;|&nbsp;
+            <strong>Sr. No.:</strong> <code>{record.get('Sr. No.')}</code> &nbsp;|&nbsp;
+            <strong>Company:</strong> {record.get('Company Name')} &nbsp;|&nbsp;
+            <strong>Customer:</strong> {record.get('Customer Name')} &nbsp;|&nbsp;
             <strong>Created:</strong> {record.get('Created At')} &nbsp;|&nbsp;
-            <strong>Last Updated:</strong> {record.get('Last Updated')} &nbsp;|&nbsp;
-            <strong>Last Updated By:</strong> {record.get('Updated By')}
+            <strong>Last Updated:</strong> {record.get('Last Updated')} ({record.get('Updated By')})
         </div>
         """,
         unsafe_allow_html=True,
@@ -507,17 +612,38 @@ def view_edit_customer(current_user: Any) -> None:
     # Edit mode option
     edit_mode = st.radio(
         "Edit Scope:",
-        ["Quick Edit Remark Only", "Full Customer Record Edit"],
+        ["Quick Edit Status & Remarks", "Full Customer Record Edit"],
         horizontal=True
     )
+
+    # Status index helper
+    curr_status = clean_string(record.get("Status", ""))
+    status_list = ["", *STATUS_OPTIONS]
+    status_idx = status_list.index(curr_status) if curr_status in status_list else 0
+
+    # Remark 1 index helper
+    curr_rem1 = clean_string(record.get("Remark 1", ""))
+    rem1_list = ["", *REMARK_1_OPTIONS]
+    rem1_idx = rem1_list.index(curr_rem1) if curr_rem1 in rem1_list else 0
+
+    # Remark 2 text
+    curr_rem2 = clean_string(record.get("Remark 2", "") or record.get("Remark", ""))
 
     with st.form("edit_customer_form"):
         updated_payload: Dict[str, Any] = {}
 
-        if edit_mode == "Quick Edit Remark Only":
-            st.info(f"Editing Remark for **{record.get('Company Name')}** ({record.get('Customer Name')})")
-            new_remark = st.text_area("Remark", value=record.get("Remark", ""), height=150)
-            updated_payload["Remark"] = new_remark
+        if edit_mode == "Quick Edit Status & Remarks":
+            st.info(f"Quick Editing Status & Remarks for **{record.get('Company Name')}** ({record.get('Customer Name')})")
+            c_s1, c_s2 = st.columns(2)
+            with c_s1:
+                new_status = st.selectbox("Status", status_list, index=status_idx)
+            with c_s2:
+                new_rem1 = st.selectbox("Remark 1 (Dropdown)", rem1_list, index=rem1_idx)
+            new_rem2 = st.text_area("Remark 2 (Manual Entry)", value=curr_rem2, height=120)
+
+            updated_payload["Status"] = new_status
+            updated_payload["Remark 1"] = new_rem1
+            updated_payload["Remark 2"] = new_rem2
         else:
             c1, c2 = st.columns(2)
             with c1:
@@ -528,7 +654,9 @@ def view_edit_customer(current_user: Any) -> None:
             with c2:
                 new_mobile = st.text_input("Mobile Number (10 digits)", value=str(record.get("Mobile Number", "")), max_chars=10)
                 new_email = st.text_input("Email", value=record.get("Email", ""))
-                new_remark = st.text_area("Remark", value=record.get("Remark", ""), height=100)
+                new_status = st.selectbox("Status", status_list, index=status_idx)
+                new_rem1 = st.selectbox("Remark 1 (Dropdown)", rem1_list, index=rem1_idx)
+                new_rem2 = st.text_area("Remark 2 (Manual Entry)", value=curr_rem2, height=100)
 
             updated_payload = {
                 "Date": new_date,
@@ -537,7 +665,9 @@ def view_edit_customer(current_user: Any) -> None:
                 "Company Address": new_address,
                 "Mobile Number": new_mobile,
                 "Email": new_email,
-                "Remark": new_remark,
+                "Status": new_status,
+                "Remark 1": new_rem1,
+                "Remark 2": new_rem2,
             }
 
         btn_c1, btn_c2 = st.columns([1, 1])
@@ -552,7 +682,6 @@ def view_edit_customer(current_user: Any) -> None:
         st.rerun()
 
     if save_clicked:
-        # Pre-validate before attempting save
         editor_identity = f"{current_user.display_name} ({current_user.email})"
 
         try:
@@ -579,7 +708,6 @@ def view_edit_customer(current_user: Any) -> None:
                         for item in changes
                     ]
                     st.table(pd.DataFrame(diff_data))
-                # Clear selected entry so user can choose another
                 st.session_state["selected_entry_id"] = None
             else:
                 st.error(f"❌ {msg}")
@@ -593,11 +721,27 @@ def view_edit_customer(current_user: Any) -> None:
     # Delete Record Section (Danger Zone)
     st.divider()
     with st.expander("🗑️ Delete Customer Record (Danger Zone)"):
-        st.warning(f"Deleting record **{chosen_id}** ({record.get('Company Name')}) will permanently remove it from the active Sales Entries. A permanent audit log will be preserved in Edit History.")
-        confirm_delete = st.checkbox(f"I confirm I want to permanently delete record {chosen_id}", key=f"confirm_del_{chosen_id}")
-        if st.button("🚨 Delete Record Permanently", type="secondary", disabled=not confirm_delete):
-            editor_identity = f"{current_user.display_name} ({current_user.email})"
-            del_ok, del_msg = record_manager.delete_record(chosen_id, deleted_by=editor_identity)
+        can_delete = is_authorized_to_delete(current_user)
+        if not can_delete:
+            st.info("🔒 Record deletion is restricted to Sagar Sir and Tushar Sir only.")
+        else:
+            st.warning(
+                f"Deleting Sr. No. **{record.get('Sr. No.')}** ({record.get('Company Name')}) "
+                f"will permanently remove it from active Sales Entries. A permanent audit log will be preserved in Edit History."
+            )
+            confirm_delete = st.checkbox(
+                f"I confirm I want to permanently delete Sr. No. {record.get('Sr. No.')} ({record.get('Company Name')})",
+                key=f"confirm_del_{chosen_id}"
+            )
+            if st.button("🚨 Delete Record Permanently", type="secondary", disabled=not confirm_delete):
+                editor_identity = f"{current_user.display_name} ({current_user.email})"
+                del_ok, del_msg = record_manager.delete_record(chosen_id, deleted_by=editor_identity, user=current_user)
+                if del_ok:
+                    st.success(del_msg)
+                    st.session_state["selected_entry_id"] = None
+                    st.rerun()
+                else:
+                    st.error(del_msg)
             if del_ok:
                 st.success(del_msg)
                 st.session_state["selected_entry_id"] = None
@@ -624,7 +768,7 @@ def view_edit_history() -> None:
     with fc2:
         f_comp = st.text_input("Filter by Company", placeholder="e.g. Precision")
     with fc3:
-        f_id = st.text_input("Filter by Entry ID", placeholder="e.g. NEP-")
+        f_id = st.text_input("Filter by Record ID", placeholder="e.g. NEP-")
     with fc4:
         f_date = st.text_input("Filter by Date", placeholder="e.g. 02-11-2026")
 
@@ -738,9 +882,9 @@ def render_dashboard() -> None:
     if "Overview" in selected_page:
         view_overview()
     elif "All Sales Entries" in selected_page:
-        view_all_entries()
+        view_all_entries(current_user)
     elif "Search Customer" in selected_page:
-        view_search()
+        view_search(current_user)
     elif "Edit Customer Details" in selected_page:
         view_edit_customer(current_user)
     elif "Edit History" in selected_page:

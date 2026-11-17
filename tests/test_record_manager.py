@@ -32,6 +32,8 @@ def test_create_and_fetch_record(manager):
     assert rec is not None
     assert rec["Company Name"] == "Omega Automation Ltd"
     assert str(rec["Mobile Number"]) == "9922334455"
+    assert rec["Sr. No."] >= 1
+    assert "Record ID" in rec
 
 
 def test_edit_only_remark(manager):
@@ -157,8 +159,14 @@ def test_delete_record_and_audit(manager):
     _, _, entry_id = manager.create_record(data)
     assert manager.get_record_by_id(entry_id) is not None
 
-    # Delete record
-    success, msg = manager.delete_record(entry_id, deleted_by="Sagar Sir")
+    # 1. Reject unauthorized deletion attempt (e.g. general staff or non-Sagar/Tushar)
+    unauthorized_res, unauthorized_msg = manager.delete_record(entry_id, deleted_by="Junior Staff (staff@neptune.com)")
+    assert unauthorized_res is False
+    assert "Permission Denied" in unauthorized_msg
+    assert manager.get_record_by_id(entry_id) is not None
+
+    # 2. Authorized deletion by Sagar Sir succeeds
+    success, msg = manager.delete_record(entry_id, deleted_by="Sagar Sir (sagar@neptunesystems.com)")
     assert success is True
     assert "permanently deleted" in msg
 
@@ -169,3 +177,47 @@ def test_delete_record_and_audit(manager):
     history = manager.get_edit_history(entry_id=entry_id)
     assert len(history) >= 1
     assert any(h["Field Changed"] == "RECORD_STATUS" and h["New Value"] == "DELETED" for h in history)
+
+
+def test_status_and_remark_filtering(manager):
+    data_interested = {
+        "Date": "02-11-2026",
+        "Company Name": "Filter Test Alpha Corp",
+        "Customer Name": "Ajay Sharma",
+        "Status": "Interested",
+        "Remark 1": "Quotation Sent",
+        "Remark 2": "Quote for 10 units sent.",
+    }
+    data_genuine = {
+        "Date": "02-11-2026",
+        "Company Name": "Filter Test Beta Corp",
+        "Customer Name": "Bina Patel",
+        "Status": "Genuine",
+        "Remark 1": "Follow-up Required",
+        "Remark 2": "Follow up next week.",
+    }
+    _, _, id1 = manager.create_record(data_interested)
+    _, _, id2 = manager.create_record(data_genuine)
+
+    # Filter by Status
+    interested_recs = manager.search_records(status="Interested")
+    assert any(r.get("Company Name") == "Filter Test Alpha Corp" for r in interested_recs)
+    assert not any(r.get("Company Name") == "Filter Test Beta Corp" for r in interested_recs)
+
+    # Filter by Remark 1
+    quote_recs = manager.search_records(remark_1="Quotation Sent")
+    assert any(r.get("Company Name") == "Filter Test Alpha Corp" for r in quote_recs)
+    assert not any(r.get("Company Name") == "Filter Test Beta Corp" for r in quote_recs)
+
+    # Clean up test records using Tushar Sir authorized account
+    manager.delete_record(id1, deleted_by="Tushar Sir")
+    manager.delete_record(id2, deleted_by="Tushar Sir")
+
+
+def test_sr_no_sequential_generation(manager):
+    records = manager.get_all_records()
+    assert len(records) > 0
+    # Verify sequential 1, 2, 3...
+    sr_numbers = [r["Sr. No."] for r in records]
+    expected_numbers = list(range(1, len(records) + 1))
+    assert sr_numbers == expected_numbers

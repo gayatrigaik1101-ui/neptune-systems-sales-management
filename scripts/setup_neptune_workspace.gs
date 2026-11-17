@@ -28,17 +28,20 @@ function setupNeptuneSystemsWorkspace() {
   }
 
   const salesHeaders = [
-    "Entry ID",
+    "Sr. No.",
     "Date",
     "Company Name",
     "Customer Name",
     "Company Address",
     "Mobile Number",
     "Email",
-    "Remark",
+    "Status",
+    "Remark 1",
+    "Remark 2",
     "Created At",
     "Last Updated",
-    "Updated By"
+    "Updated By",
+    "Record ID"
   ];
   salesSheet.appendRow(salesHeaders);
   salesSheet.setFrozenRows(1);
@@ -54,7 +57,7 @@ function setupNeptuneSystemsWorkspace() {
   const historySheet = ss.insertSheet("Edit History");
   const historyHeaders = [
     "History ID",
-    "Entry ID",
+    "Record ID",
     "Company Name",
     "Field Changed",
     "Previous Value",

@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from app.config import config, CREDENTIALS_DIR, BACKUPS_DIR
-from app.utils import logger, clean_string, get_current_timestamp_str, generate_entry_id
+from app.utils import logger, clean_string, get_current_timestamp_str, generate_entry_id, generate_record_id
 from app.audit_logger import AuditHistoryItem
 
 # Optional Google libraries import
@@ -174,7 +174,7 @@ class GoogleSheetsConnector:
     def ensure_worksheets_structure(self) -> None:
         """
         Ensures all 3 required worksheets exist with exact column headers and formatting:
-        Worksheet 1: Sales Entries
+        Worksheet 1: Sales Entries (14 columns including Sr. No., Status, Remark 1, Remark 2, Record ID)
         Worksheet 2: Edit History
         Worksheet 3: Dashboard Data
         """
@@ -194,7 +194,6 @@ class GoogleSheetsConnector:
                 logger.info(f"Creating missing worksheet in Google Sheets: '{title}'")
                 ws = self.spreadsheet.add_worksheet(title=title, rows=1000, cols=len(headers) + 2)
                 ws.append_row(headers)
-                # Freeze top row
                 ws.freeze(rows=1)
             else:
                 ws = existing_sheets[title]
@@ -202,6 +201,76 @@ class GoogleSheetsConnector:
                 if not first_row:
                     ws.append_row(headers)
                     ws.freeze(rows=1)
+                elif title == config.sheets_config["sales_entries"]["name"]:
+                    # Check if schema migration is required
+                    if first_row != headers:
+                        self.upgrade_sales_entries_schema(ws)
+                elif title == config.sheets_config["edit_history"]["name"]:
+                    if first_row != headers and len(first_row) == len(headers):
+                        ws.update("A1", [headers])
+
+    def upgrade_sales_entries_schema(self, ws: Any) -> None:
+        """
+        Migrates existing Sales Entries worksheet to the updated schema:
+        ['Sr. No.', 'Date', 'Company Name', 'Customer Name', 'Company Address',
+         'Mobile Number', 'Email', 'Status', 'Remark 1', 'Remark 2',
+         'Created At', 'Last Updated', 'Updated By', 'Record ID']
+        Preserves all genuine existing records, backfilling Sr. No., Status, Remark 1, Remark 2, and Record ID.
+        """
+        try:
+            old_rows = ws.get_all_values()
+            if not old_rows:
+                ws.append_row(config.sales_entries_columns)
+                ws.freeze(rows=1)
+                return
+
+            old_headers = [h.strip() for h in old_rows[0]]
+            if old_headers == config.sales_entries_columns:
+                return
+
+            logger.info("Migrating Google Sheets 'Sales Entries' to updated schema...")
+            data_rows = old_rows[1:]
+            header_map = {h: idx for idx, h in enumerate(old_headers)}
+
+            new_rows = []
+            for sr_idx, row in enumerate(data_rows, 1):
+                def get_val(col_name: str) -> str:
+                    idx = header_map.get(col_name)
+                    if idx is not None and idx < len(row):
+                        return clean_string(row[idx])
+                    return ""
+
+                old_id = get_val("Record ID") or get_val("Entry ID") or generate_record_id("NEP")
+                old_remark = get_val("Remark")
+                status_val = get_val("Status") or "Genuine"
+                remark_1_val = get_val("Remark 1") or "Contacted"
+                remark_2_val = get_val("Remark 2") or old_remark
+
+                row_dict = {
+                    "Sr. No.": sr_idx,
+                    "Date": get_val("Date"),
+                    "Company Name": get_val("Company Name"),
+                    "Customer Name": get_val("Customer Name"),
+                    "Company Address": get_val("Company Address"),
+                    "Mobile Number": f"'{get_val('Mobile Number')}",
+                    "Email": get_val("Email"),
+                    "Status": status_val,
+                    "Remark 1": remark_1_val,
+                    "Remark 2": remark_2_val,
+                    "Created At": get_val("Created At"),
+                    "Last Updated": get_val("Last Updated"),
+                    "Updated By": get_val("Updated By"),
+                    "Record ID": old_id,
+                }
+                new_rows.append([row_dict.get(c, "") for c in config.sales_entries_columns])
+
+            ws.clear()
+            all_content = [config.sales_entries_columns] + new_rows
+            ws.update("A1", all_content, value_input_option="USER_ENTERED")
+            ws.freeze(rows=1)
+            logger.info(f"Successfully migrated {len(new_rows)} rows to updated Google Sheets schema.")
+        except Exception as e:
+            logger.error(f"Failed to migrate Google Sheets schema: {e}")
 
     # =========================================================================
     # SALES ENTRIES OPERATIONS (WORKSHEET 1)
@@ -210,35 +279,57 @@ class GoogleSheetsConnector:
     def fetch_all_sales_entries(self) -> List[Dict[str, Any]]:
         """
         Fetches all customer sales records from Worksheet 1: 'Sales Entries'.
-        Returns a list of dictionaries with column names as keys.
+        Ensures Sr. No. is sequential and Record ID is guaranteed for each entry.
         """
+        raw_records: List[Dict[str, Any]] = []
         if self.is_connected and self.spreadsheet:
             try:
                 sheet_name = config.sheets_config["sales_entries"]["name"]
                 ws = self.spreadsheet.worksheet(sheet_name)
-                records = ws.get_all_records(default_blank="")
-                # Sync to local backup mirror for redundancy
-                self._save_to_local_mirror("sales_entries", records)
-                return records
+                raw_records = ws.get_all_records(default_blank="")
             except Exception as e:
                 logger.error(f"Error reading live Google Sheets: {e}. Falling back to local mirror.")
 
-        # Read from local mirror
-        return self._read_from_local_mirror("sales_entries")
+        if not raw_records:
+            raw_records = self._read_from_local_mirror("sales_entries")
 
-    def fetch_sales_entry_by_id(self, entry_id: str) -> Optional[Tuple[int, Dict[str, Any]]]:
+        # Normalize records with sequential Sr. No. and guaranteed Record ID
+        normalized_records = []
+        for idx, r in enumerate(raw_records, 1):
+            rec = dict(r)
+            rec_id = clean_string(rec.get("Record ID") or rec.get("Entry ID") or f"NEP-REC-{idx:04d}")
+            rec["Record ID"] = rec_id
+            rec["Entry ID"] = rec_id  # preserve compatibility
+            rec["Sr. No."] = idx
+
+            # Normalize Status & Remarks
+            rec["Status"] = clean_string(rec.get("Status", ""))
+            rec["Remark 1"] = clean_string(rec.get("Remark 1", ""))
+            rec["Remark 2"] = clean_string(rec.get("Remark 2", "") or rec.get("Remark", ""))
+            rec["Remark"] = rec["Remark 2"] or rec["Remark 1"]
+
+            normalized_records.append(rec)
+
+        # Sync normalized copy to local mirror
+        self._save_to_local_mirror("sales_entries", normalized_records)
+        return normalized_records
+
+    def fetch_sales_entry_by_id(self, target_id: str) -> Optional[Tuple[int, Dict[str, Any]]]:
         """
-        Retrieves a single sales entry by its unique Entry ID.
+        Retrieves a single sales entry by its Record ID, Entry ID, or Sr. No.
         Returns tuple of (1-based row index in sheet, record dictionary) or None.
         """
-        target_id = clean_string(entry_id).upper()
-        if not target_id:
+        clean_target = clean_string(target_id).upper()
+        if not clean_target:
             return None
 
         entries = self.fetch_all_sales_entries()
         for idx, entry in enumerate(entries):
-            # Row index in Google Sheets: +2 (+1 for 0-index, +1 for header row)
-            if clean_string(entry.get("Entry ID", "")).upper() == target_id:
+            r_id = clean_string(entry.get("Record ID", "")).upper()
+            e_id = clean_string(entry.get("Entry ID", "")).upper()
+            sr_str = str(entry.get("Sr. No.", ""))
+
+            if clean_target in (r_id, e_id, sr_str):
                 return (idx + 2, entry)
 
         return None
@@ -246,64 +337,68 @@ class GoogleSheetsConnector:
     def insert_sales_entry(self, data: Dict[str, Any], created_by: str = "Sales Team") -> str:
         """
         Inserts a new sales customer submission into Worksheet 1 ('Sales Entries').
-        Automatically assigns a unique Entry ID, timestamp, and sets Updated By.
-        Never overwrites existing entries.
-        Returns the generated Entry ID.
+        Automatically assigns next sequential Sr. No., permanent Record ID, timestamp, and sets Updated By.
         """
-        entry_id = data.get("Entry ID") or generate_entry_id("NEP")
+        existing = self.fetch_all_sales_entries()
+        sr_no = len(existing) + 1
+        record_id = clean_string(data.get("Record ID") or data.get("Entry ID") or generate_record_id("NEP"))
         now_ts = get_current_timestamp_str()
-
-        # Build row according to exact column schema
         columns = config.sales_entries_columns
+
         row_dict = {
-            "Entry ID": entry_id,
+            "Sr. No.": sr_no,
             "Date": clean_string(data.get("Date", "")),
             "Company Name": clean_string(data.get("Company Name", "")),
             "Customer Name": clean_string(data.get("Customer Name", "")),
             "Company Address": clean_string(data.get("Company Address", "")),
-            "Mobile Number": f"'{clean_string(data.get('Mobile Number', ''))}",  # Prefix with ' to force plain text in Sheets
+            "Mobile Number": f"'{clean_string(data.get('Mobile Number', ''))}",
             "Email": clean_string(data.get("Email", "")),
-            "Remark": clean_string(data.get("Remark", "")),
+            "Status": clean_string(data.get("Status", "")),
+            "Remark 1": clean_string(data.get("Remark 1", "")),
+            "Remark 2": clean_string(data.get("Remark 2", "") or data.get("Remark", "")),
             "Created At": data.get("Created At") or now_ts,
             "Last Updated": now_ts,
             "Updated By": created_by,
+            "Record ID": record_id,
         }
 
-        # Value list in column order
         row_values = [row_dict.get(col, "") for col in columns]
 
         if self.is_connected and self.spreadsheet:
             try:
                 sheet_name = config.sheets_config["sales_entries"]["name"]
                 ws = self.spreadsheet.worksheet(sheet_name)
-                # Append row safely (never overwriting previous entries)
                 ws.append_row(row_values, value_input_option="USER_ENTERED")
-                logger.info(f"Appended new sales entry {entry_id} to Google Sheets row.")
+                logger.info(f"Appended new sales entry {record_id} (Sr. No. {sr_no}) to Google Sheets row.")
             except Exception as e:
                 logger.error(f"Failed to append to Google Sheets: {e}. Writing to local mirror.")
 
-        # Persist to local mirror (without apostrophe prefix in clean dict)
+        # Persist to local mirror (without apostrophe prefix)
         clean_row = dict(row_dict)
         clean_row["Mobile Number"] = clean_string(data.get("Mobile Number", ""))
+        clean_row["Entry ID"] = record_id
+        clean_row["Remark"] = clean_row["Remark 2"] or clean_row["Remark 1"]
         self._append_to_local_mirror("sales_entries", clean_row)
-        return entry_id
+        return record_id
 
     def update_sales_entry(
         self,
-        entry_id: str,
-        updated_fields: Dict[str, Any],
-        editor_user_identity: str,
+        record_id: Optional[str] = None,
+        updated_fields: Optional[Dict[str, Any]] = None,
+        editor_user_identity: str = "",
+        entry_id: Optional[str] = None,
     ) -> bool:
         """
         Updates an existing customer row in Worksheet 1: 'Sales Entries'.
-        CRITICAL BUSINESS LOGIC:
-        - Locates the EXACT existing row.
-        - NEVER creates a new customer row during an edit.
-        - Automatically updates 'Last Updated' timestamp.
-        - Records the verified editor's identity in 'Updated By'.
-        - Preserves all unchanged fields.
+        Targets the record by its permanent Record ID (or legacy Entry ID).
+        Preserves Sr. No., Record ID, Created At.
         """
-        target_id = clean_string(entry_id).upper()
+        target_raw = record_id or entry_id or ""
+        target = clean_string(target_raw).upper()
+        if not target:
+            return False
+        if updated_fields is None:
+            updated_fields = {}
         now_ts = get_current_timestamp_str()
         columns = config.sales_entries_columns
 
@@ -317,50 +412,58 @@ class GoogleSheetsConnector:
                 target_row_idx = None
                 existing_entry = None
                 for idx, r in enumerate(records):
-                    if clean_string(r.get("Entry ID", "")).upper() == target_id:
-                        target_row_idx = idx + 2  # 1-based, plus header row
+                    r_id = clean_string(r.get("Record ID", "")).upper()
+                    e_id = clean_string(r.get("Entry ID", "")).upper()
+                    if target in (r_id, e_id):
+                        target_row_idx = idx + 2
                         existing_entry = r
                         break
 
                 if not target_row_idx or not existing_entry:
-                    logger.error(f"Cannot update: Entry ID '{entry_id}' not found in Google Sheets.")
+                    logger.error(f"Cannot update: Record ID '{record_id}' not found in Google Sheets.")
                     return False
 
                 # Merge changes
                 merged = dict(existing_entry)
                 for k, v in updated_fields.items():
-                    if k in columns and k not in {"Entry ID", "Created At"}:
+                    if k in columns and k not in {"Sr. No.", "Record ID", "Entry ID", "Created At"}:
                         merged[k] = clean_string(v)
+
+                if "Remark" in updated_fields and "Remark 2" not in updated_fields:
+                    merged["Remark 2"] = clean_string(updated_fields["Remark"])
 
                 merged["Last Updated"] = now_ts
                 merged["Updated By"] = clean_string(editor_user_identity)
 
-                # Format mobile number as text if changed
                 if "Mobile Number" in merged:
                     merged["Mobile Number"] = f"'{clean_string(merged['Mobile Number'])}"
 
                 new_row_values = [merged.get(col, "") for col in columns]
 
-                # Update the EXACT row range (e.g. A2:K2)
                 col_end_letter = chr(ord('A') + len(columns) - 1)
                 cell_range = f"A{target_row_idx}:{col_end_letter}{target_row_idx}"
-                ws.update(cell_range, [new_row_values], value_input_option="USER_ENTERED")
-                logger.info(f"Successfully updated row {target_row_idx} ({entry_id}) in Google Sheets.")
+                ws.update(values=[new_row_values], range_name=cell_range, value_input_option="USER_ENTERED")
+                logger.info(f"Successfully updated row {target_row_idx} ({record_id}) in Google Sheets.")
 
             except Exception as e:
                 logger.error(f"Live Google Sheets update failed: {e}. Falling back to mirror.")
                 return False
 
-        # Update Local Mirror as well
+        # Update Local Mirror
         mirror_entries = self._read_from_local_mirror("sales_entries")
         found = False
         for entry in mirror_entries:
-            if clean_string(entry.get("Entry ID", "")).upper() == target_id:
+            r_id = clean_string(entry.get("Record ID", "")).upper()
+            e_id = clean_string(entry.get("Entry ID", "")).upper()
+            if target in (r_id, e_id):
                 for k, v in updated_fields.items():
-                    if k not in {"Entry ID", "Created At"}:
+                    if k not in {"Sr. No.", "Record ID", "Entry ID", "Created At"}:
                         entry[k] = clean_string(v)
+                if "Remark" in updated_fields and "Remark 2" not in updated_fields:
+                    entry["Remark 2"] = clean_string(updated_fields["Remark"])
                 entry["Last Updated"] = now_ts
                 entry["Updated By"] = clean_string(editor_user_identity)
+                entry["Remark"] = entry.get("Remark 2", "") or entry.get("Remark 1", "")
                 found = True
                 break
 
@@ -370,13 +473,21 @@ class GoogleSheetsConnector:
 
         return False
 
-    def delete_sales_entry(self, entry_id: str, deleted_by: str = "Admin") -> bool:
+    def delete_sales_entry(
+        self,
+        record_id: Optional[str] = None,
+        deleted_by: str = "Admin",
+        entry_id: Optional[str] = None,
+    ) -> bool:
         """
         Deletes a customer record from Worksheet 1 ('Sales Entries').
-        Automatically appends a deletion record to Worksheet 2 ('Edit History')
-        to maintain an unbroken audit trail.
+        Recalculates sequential Sr. No. for all remaining records.
+        Automatically appends a deletion record to Worksheet 2 ('Edit History').
         """
-        target_id = clean_string(entry_id).upper()
+        target_raw = record_id or entry_id or ""
+        target = clean_string(target_raw).upper()
+        if not target:
+            return False
         now_ts = get_current_timestamp_str()
         deleted_company = ""
 
@@ -389,23 +500,34 @@ class GoogleSheetsConnector:
 
                 target_row_idx = None
                 for idx, r in enumerate(records):
-                    if clean_string(r.get("Entry ID", "")).upper() == target_id:
+                    r_id = clean_string(r.get("Record ID", "")).upper()
+                    e_id = clean_string(r.get("Entry ID", "")).upper()
+                    if target in (r_id, e_id):
                         target_row_idx = idx + 2
                         deleted_company = clean_string(r.get("Company Name", ""))
                         break
 
                 if target_row_idx:
                     ws.delete_rows(target_row_idx)
-                    logger.info(f"Deleted row {target_row_idx} ({entry_id}) from Google Sheets.")
+                    logger.info(f"Deleted row {target_row_idx} ({record_id}) from Google Sheets.")
+
+                    # Recalculate Sr. No. for remaining rows in Google Sheets
+                    remaining_count = len(records) - 1
+                    if remaining_count > 0:
+                        sr_vals = [[i] for i in range(1, remaining_count + 1)]
+                        ws.update(values=sr_vals, range_name=f"A2:A{remaining_count + 1}", value_input_option="USER_ENTERED")
+                        logger.info("Recalculated sequential Sr. No. in Google Sheets.")
             except Exception as e:
                 logger.error(f"Live Google Sheets deletion failed: {e}")
 
-        # Delete from Local Mirror
+        # Delete from Local Mirror & recalculate Sr. No.
         mirror_entries = self._read_from_local_mirror("sales_entries")
         new_entries = []
         found = False
         for entry in mirror_entries:
-            if clean_string(entry.get("Entry ID", "")).upper() == target_id:
+            r_id = clean_string(entry.get("Record ID", "")).upper()
+            e_id = clean_string(entry.get("Entry ID", "")).upper()
+            if target in (r_id, e_id):
                 found = True
                 if not deleted_company:
                     deleted_company = clean_string(entry.get("Company Name", ""))
@@ -413,13 +535,17 @@ class GoogleSheetsConnector:
                 new_entries.append(entry)
 
         if found:
+            # Re-index Sr. No. sequentially
+            for i, entry in enumerate(new_entries, 1):
+                entry["Sr. No."] = i
+
             self._save_to_local_mirror("sales_entries", new_entries)
 
             # Record deletion in audit history
             from app.utils import generate_history_id
             deletion_audit = AuditHistoryItem(
                 history_id=generate_history_id(),
-                entry_id=entry_id,
+                entry_id=record_id,
                 company_name=deleted_company,
                 field_changed="RECORD_STATUS",
                 previous_value="ACTIVE",

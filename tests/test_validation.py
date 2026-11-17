@@ -101,7 +101,49 @@ def test_full_record_validation():
         "Mobile Number": "",
         "Email": "",
         "Remark": "",
+        "Status": "Interested",
+        "Remark 1": "Follow-up Required",
+        "Remark 2": "Customer requested callback tomorrow.",
     }
     res2: ValidationResult = SalesDataValidator.validate_record(minimal_record)
     assert res2.is_valid is True
     assert len(res2.errors) == 0
+    assert res2.sanitized_data["Status"] == "Interested"
+    assert res2.sanitized_data["Remark 1"] == "Follow-up Required"
+    assert res2.sanitized_data["Remark 2"] == "Customer requested callback tomorrow."
+
+
+def test_status_validation():
+    for valid_status in ["Interested", "Not Interested", "Genuine", "interested", "genuine"]:
+        ok, err, val = SalesDataValidator.validate_status(valid_status)
+        assert ok is True
+        assert val in ["Interested", "Not Interested", "Genuine"]
+
+    # Blank status is accepted
+    ok, err, val = SalesDataValidator.validate_status("")
+    assert ok is True
+    assert val == ""
+
+
+def test_remark_1_validation():
+    for valid_rem in ["Contacted", "Follow-up Required", "Quotation Sent", "Unknown"]:
+        ok, err, val = SalesDataValidator.validate_remark_1(valid_rem)
+        assert ok is True
+        assert val != ""
+
+    # Blank remark 1 is accepted
+    ok, err, val = SalesDataValidator.validate_remark_1("")
+    assert ok is True
+    assert val == ""
+
+
+def test_remark_2_manual_entry():
+    custom_note = "Detailed discussion regarding hydraulic fixture package. Follow up on Tuesday."
+    ok, err, val = SalesDataValidator.validate_remark_2(custom_note)
+    assert ok is True
+    assert val == custom_note
+
+    # Blank remark 2 is accepted
+    ok, err, val = SalesDataValidator.validate_remark_2("")
+    assert ok is True
+    assert val == ""

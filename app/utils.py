@@ -79,11 +79,54 @@ def parse_date_string(date_str: str) -> Optional[datetime]:
     return None
 
 
+STATUS_OPTIONS = [
+    "Interested",
+    "Not Interested",
+    "Genuine",
+]
+
+REMARK_1_OPTIONS = [
+    "Contacted",
+    "Follow-up Required",
+    "Quotation Sent",
+    "Quotation Pending",
+    "Required in future",
+    "Calling Pending",
+    "Call back",
+    "Call not received",
+    "switch off",
+    "not reachable",
+    "Incoming call Barred",
+    "Forwarding to voice mail",
+    "Call busy",
+    "Out of service",
+    "Education Purpose",
+    "No Requirement",
+    "Working Pending",
+    "Simulation Pending",
+    "Customer Detail Sending Soon",
+    "Decision Pending",
+    "Under discussion",
+    "Visit Pending",
+    "Customer want visit",
+    "Design Pending",
+    "Robot supplier",
+    "Government Project",
+    "Neptune Visit",
+    "Unknown",
+]
+
+
 def generate_entry_id(prefix: str = "NEP") -> str:
-    """Generates a unique business Entry ID (e.g. NEP-20261102-A1B2)."""
+    """Generates a unique business Record ID (e.g. NEP-20261102-A1B2)."""
     date_part = datetime.now().strftime("%Y%m%d")
     unique_suffix = uuid.uuid4().hex[:4].upper()
     return f"{prefix}-{date_part}-{unique_suffix}"
+
+
+def generate_record_id(prefix: str = "NEP") -> str:
+    """Generates an internal, permanent unique Record ID."""
+    return generate_entry_id(prefix)
 
 
 def generate_history_id() -> str:
