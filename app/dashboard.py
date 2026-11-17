@@ -743,12 +743,6 @@ def view_edit_customer(current_user: Any) -> None:
                     st.rerun()
                 else:
                     st.error(del_msg)
-            if del_ok:
-                st.success(del_msg)
-                st.session_state["selected_entry_id"] = None
-                st.rerun()
-            else:
-                st.error(del_msg)
 
 
 # =============================================================================
