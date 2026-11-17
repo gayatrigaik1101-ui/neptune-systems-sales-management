@@ -202,7 +202,11 @@ def render_sidebar(current_user: Any) -> str:
             st.warning("Mirror Mode (Pending Google Auth)")
             st.caption("See 'Google Setup Guide' to link your Google Spreadsheet.")
 
-        if st.button("🔄 Sync with Google Sheets", use_container_width=True):
+        sheet_id = config.google_workspace.spreadsheet_id
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+        st.link_button("📂 Open Google Spreadsheet", sheet_url, use_container_width=True)
+
+        if st.button("🔄 Refresh Data from Sheets", use_container_width=True):
             sheets_connector.connect()
             st.rerun()
 
