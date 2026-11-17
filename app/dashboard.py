@@ -202,7 +202,7 @@ def render_sidebar(current_user: Any) -> str:
             st.warning("Mirror Mode (Pending Google Auth)")
             st.caption("See 'Google Setup Guide' to link your Google Spreadsheet.")
 
-        sheet_id = config.google_workspace.spreadsheet_id
+        sheet_id = config.google_workspace.get("spreadsheet_id") or "12uDlqhwf2moVgRCZvRnvpTYGa5O6OHAa_rWyME6ZF_4"
         sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
         st.link_button("📂 Open Google Spreadsheet", sheet_url, use_container_width=True)
 
